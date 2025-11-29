@@ -2,45 +2,31 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import shap
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
-# =========================================================
+# ---------------------------------------------------------
 # PAGE CONFIGURATION
-# =========================================================
+# ---------------------------------------------------------
 st.set_page_config(
     page_title="Arthroplasty LOS Explorer",
     page_icon="🦴",
     layout="wide",
 )
 
-# =========================================================
-# MODERN CSS
-# =========================================================
+# ---------------------------------------------------------
+# MODERN CSS (unchanged)
+# ---------------------------------------------------------
 modern_css = """
 <style>
-    body {
-        background-color: #f7f9fc;
-    }
+    body { background-color: #f7f9fc; }
     .main-title {
-        font-size: 2.4rem;
-        font-weight: 800;
-        margin-bottom: 0.2rem;
+        font-size: 2.4rem; font-weight: 800; margin-bottom: 0.2rem;
         background: -webkit-linear-gradient(90deg,#0048ff,#6a00ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
-    .sub-title {
-        font-size: 1.05rem;
-        font-weight: 400;
-        color: #5e6572;
-        margin-bottom: 1.6rem;
-    }
+    .sub-title { font-size: 1.05rem; color: #5e6572; margin-bottom: 1.6rem; }
     .card {
-        padding: 1.2rem 1.4rem;
-        border-radius: 1rem;
-        background: white;
+        padding: 1.2rem 1.4rem; border-radius: 1rem; background: white;
         box-shadow: 0 4px 16px rgba(0,0,0,0.06);
         border: 1px solid rgba(0,0,0,0.04);
         transition: 0.2s ease-in-out;
@@ -50,39 +36,23 @@ modern_css = """
         box-shadow: 0 6px 20px rgba(0,0,0,0.10);
     }
     .section-label {
-        font-size: 0.82rem;
-        font-weight: 600;
-        color: #7b7f87;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin-bottom: 0.5rem;
+        font-size: 0.82rem; font-weight: 600; color: #7b7f87;
+        letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.5rem;
     }
     .risk-pill {
-        padding: 0.35rem 0.9rem;
-        border-radius: 999px;
-        font-weight: 600;
-        font-size: 0.95rem;
-        display: inline-block;
+        padding: 0.35rem 0.9rem; border-radius: 999px;
+        font-weight: 600; font-size: 0.95rem; display: inline-block;
     }
-    .risk-low {
-        background-color: #e6f4ea;
-        color: #137333;
-    }
-    .risk-moderate {
-        background-color: #fff4ce;
-        color: #9c6700;
-    }
-    .risk-high {
-        background-color: #fde8e7;
-        color: #d93025;
-    }
+    .risk-low { background-color: #e6f4ea; color: #137333; }
+    .risk-moderate { background-color: #fff4ce; color: #9c6700; }
+    .risk-high { background-color: #fde8e7; color: #d93025; }
 </style>
 """
 st.markdown(modern_css, unsafe_allow_html=True)
 
-# =========================================================
+# ---------------------------------------------------------
 # SIDEBAR
-# =========================================================
+# ---------------------------------------------------------
 with st.sidebar:
     st.markdown("## 🧠 Model Overview")
     st.write(
@@ -90,37 +60,34 @@ with st.sidebar:
         "after elective hip/knee arthroplasty using an explainable XGBoost model."
     )
     st.markdown("### 📘 Quick Steps")
-    st.markdown(
-        """
+    st.markdown("""
 1. Go to **Prediction**
 2. Enter basic patient info
 3. Click **Predict Risk**
 4. Open **Explainability** tab
-"""
-    )
+""")
     st.markdown("---")
     st.caption("⚠️ Research prototype only — not for clinical use.")
 
-# =========================================================
-# LOAD MODEL & METADATA
-# =========================================================
-@st.cache_resource
-def load_model_and_meta():
+# ---------------------------------------------------------
+# CACHE MODEL (MAJOR SPEED BOOST)
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_model():
     pipeline = joblib.load("los_xgb_pipeline.joblib")
     feature_cols = joblib.load("feature_cols.joblib")
-    return pipeline, feature_cols
+    preprocessor = pipeline.named_steps["preprocess"]
+    model = pipeline.named_steps["model"]
+    return pipeline, feature_cols, preprocessor, model
 
-pipeline, feature_cols = load_model_and_meta()
-
-preprocessor = pipeline.named_steps["preprocess"]
-model = pipeline.named_steps["model"]
+pipeline, feature_cols, preprocessor, model = load_model()
 
 numeric_features = preprocessor.transformers_[0][2]
 categorical_features = preprocessor.transformers_[1][2]
 
-# =========================================================
+# ---------------------------------------------------------
 # HELPERS
-# =========================================================
+# ---------------------------------------------------------
 def risk_label(prob):
     if prob < 0.20:
         return "Low", "🟢", "risk-low"
@@ -134,89 +101,73 @@ def to_timestamp_int(dt: datetime) -> int:
     return int(dt.strftime("%Y%m%d%H%M%S"))
 
 
-def build_feature_row(
-    age, bmi, height_cm, asa,
-    sex_label, race_label, anaesthetic_label,
-    op_duration_min, icd10_label,
-):
-    height_m = height_cm / 100.0
+def build_feature_row(age, bmi, height_cm, asa, sex_label, race_label,
+                      anaesthetic_label, op_duration_min, icd10_label):
+
+    height_m = height_cm / 100
     weight = bmi * (height_m ** 2)
 
     emop = 0
     department = "OS"
 
-    base_start = datetime(2024, 1, 1, 9, 0, 0)
+    base_start = datetime(2024, 1, 1, 9)
     opstart_dt = base_start
     opend_dt = opstart_dt + timedelta(minutes=op_duration_min)
     discharge_dt = opend_dt + timedelta(days=2)
 
-    row = {}
-    for col in feature_cols:
-        if col == "age": row[col] = age
-        elif col == "weight": row[col] = weight
-        elif col == "height": row[col] = height_cm
-        elif col == "asa": row[col] = asa
-        elif col == "emop": row[col] = emop
-        elif col == "opstart_time": row[col] = to_timestamp_int(opstart_dt)
-        elif col == "opend_time": row[col] = to_timestamp_int(opend_dt)
-        elif col == "discharge_time": row[col] = to_timestamp_int(discharge_dt)
-        elif col == "bmi": row[col] = bmi
-        elif col == "op_duration": row[col] = op_duration_min
-        elif col == "sex": row[col] = sex_label
-        elif col == "race": row[col] = race_label
-        elif col == "department": row[col] = department
-        elif col == "antype": row[col] = anaesthetic_label
-        elif col == "icd10_pcs": row[col] = icd10_label
-        else:
-            row[col] = np.nan
+    opstart_time = to_timestamp_int(opstart_dt)
+    opend_time = to_timestamp_int(opend_dt)
+    discharge_time = to_timestamp_int(discharge_dt)
+
+    row = {col: np.nan for col in feature_cols}
+
+    mapping = {
+        "age": age, "bmi": bmi, "height": height_cm, "weight": weight,
+        "asa": asa, "emop": emop,
+        "opstart_time": opstart_time, "opend_time": opend_time,
+        "discharge_time": discharge_time,
+        "op_duration": op_duration_min,
+        "sex": sex_label, "race": race_label,
+        "department": department, "antype": anaesthetic_label,
+        "icd10_pcs": icd10_label,
+    }
+
+    for col, val in mapping.items():
+        if col in row:
+            row[col] = val
 
     return row
 
-# =========================================================
+# ---------------------------------------------------------
 # HEADER
-# =========================================================
-st.markdown(
-    '<div class="main-title">Arthroplasty LOS Risk Explorer</div>',
-    unsafe_allow_html=True,
-)
-st.markdown(
-    '<div class="sub-title">A modern, explainable ML tool for postoperative length-of-stay risk.</div>',
-    unsafe_allow_html=True,
-)
+# ---------------------------------------------------------
+st.markdown('<div class="main-title">Arthroplasty LOS Risk Explorer</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">A modern, explainable ML tool for postoperative length-of-stay risk.</div>', unsafe_allow_html=True)
 
-# =========================================================
+# ---------------------------------------------------------
 # TABS
-# =========================================================
+# ---------------------------------------------------------
 tab_pred, tab_explain, tab_about = st.tabs(
     ["🔍 Prediction", "📊 Explainability", "ℹ️ About"]
 )
 
-# =========================================================
+# ---------------------------------------------------------
 # TAB 1 — PREDICTION
-# =========================================================
+# ---------------------------------------------------------
 with tab_pred:
-    st.markdown(
-        '<div class="section-label">Patient Inputs</div>', unsafe_allow_html=True
-    )
-    st.markdown(
-        '<div class="card">Enter basic perioperative details below. '
-        'Additional model features are computed automatically.</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-label">Patient Inputs</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card">Enter perioperative details below. Additional model features are computed automatically.</div>', unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1.3, 1])
 
     with col_left:
-        st.markdown(
-            '<div class="section-label">Patient Profile</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="section-label">Patient Profile</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         age = c1.number_input("Age (years)", 18, 100, 65)
-        height_cm = c2.number_input("Height (cm)", 140.0, 210.0, 170.0)
+        height_cm = c2.number_input("Height (cm)", 140.0, 210.0, 170.0, step=0.5)
 
         c3, c4 = st.columns(2)
-        bmi = c3.number_input("BMI (kg/m²)", 15.0, 60.0, 28.0)
+        bmi = c3.number_input("BMI (kg/m²)", 15.0, 60.0, 28.0, step=0.1)
         asa = c4.selectbox("ASA Class", [1, 2, 3, 4, 5], index=1)
 
         st.markdown('<div class="section-label">Demographics</div>', unsafe_allow_html=True)
@@ -226,12 +177,12 @@ with tab_pred:
 
         st.markdown('<div class="section-label">Procedure & Anaesthesia</div>', unsafe_allow_html=True)
         c7, c8 = st.columns(2)
-        procedure_type = c7.selectbox("Procedure Type (for info only)", ["Total Hip Arthroplasty", "Total Knee Arthroplasty"])
+        procedure_type = c7.selectbox("Procedure Type", ["Total Hip Arthroplasty", "Total Knee Arthroplasty"])
         anaesthetic_label = c8.selectbox("Anaesthetic Type", ["General", "Spinal", "Combined"])
 
         st.markdown('<div class="section-label">Operative Parameters</div>', unsafe_allow_html=True)
         c9, c10 = st.columns(2)
-        op_duration_min = c9.number_input("Operative duration (minutes)", 30, 300, 90)
+        op_duration_min = c9.number_input("Operative duration (minutes)", 30, 300, 90, step=5)
         icd10_label = c10.selectbox("ICD-10-PCS Code", ["0WJG0", "0DHS0", "0QB90"])
 
     with col_right:
@@ -241,13 +192,13 @@ with tab_pred:
             row = build_feature_row(
                 age, bmi, height_cm, asa,
                 sex_label, race_label, anaesthetic_label,
-                op_duration_min, icd10_label,
+                op_duration_min, icd10_label
             )
             input_df = pd.DataFrame([row], columns=feature_cols)
-            st.session_state["input_df"] = input_df
 
-            proba = pipeline.predict_proba(input_df)[0, 1]
-            st.session_state["proba"] = float(proba)
+            proba = float(pipeline.predict_proba(input_df)[0, 1])
+            st.session_state["input_df"] = input_df
+            st.session_state["proba"] = proba
 
             label, icon, css = risk_label(proba)
 
@@ -261,19 +212,23 @@ with tab_pred:
         else:
             st.info("Enter patient details and click **Predict Risk**.")
 
-# =========================================================
-# TAB 2 — EXPLAINABILITY
-# =========================================================
+# ---------------------------------------------------------
+# TAB 2 — EXPLAINABILITY (LAZY LOADED FOR SPEED)
+# ---------------------------------------------------------
 with tab_explain:
     st.markdown('<div class="section-label">Explainability</div>', unsafe_allow_html=True)
-    st.markdown('<div class="card">This section explains the most recent prediction using SHAP values.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card">This section explains the latest prediction using SHAP values.</div>', unsafe_allow_html=True)
 
     if "input_df" not in st.session_state:
         st.info("Please make a prediction first in the **Prediction** tab.")
     else:
-        input_df = st.session_state["input_df"]
-
+        # 🔥 Lazy import SHAP only here
         with st.spinner("Computing SHAP values..."):
+            import shap
+            import matplotlib.pyplot as plt
+
+            input_df = st.session_state["input_df"]
+
             X_trans = preprocessor.transform(input_df)
             X_trans = np.array(X_trans, dtype=np.float64)
 
@@ -300,13 +255,13 @@ with tab_explain:
             st.pyplot(fig)
             st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================================================
+# ---------------------------------------------------------
 # TAB 3 — ABOUT
-# =========================================================
+# ---------------------------------------------------------
 with tab_about:
     st.markdown('<div class="section-label">About</div>', unsafe_allow_html=True)
-    st.markdown(
-        """
+
+    st.markdown("""
 <div class="card">
 <h3>📘 Model Summary</h3>
 <ul>
@@ -317,19 +272,14 @@ with tab_about:
 <li>Explainability: TreeSHAP (global + local)</li>
 </ul>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+""", unsafe_allow_html=True)
 
     st.write("")
-    st.markdown(
-        """
+    st.markdown("""
 <div class="card">
 <h3>⚠️ Important Notice</h3>
 This dashboard is a <strong>research prototype</strong> created for a postgraduate
-dissertation on postoperative recovery prediction. It is not validated for
-clinical use and must not guide real medical decisions.
+dissertation project. It is not validated for clinical use.
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+""", unsafe_allow_html=True)
+
