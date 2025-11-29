@@ -1,9 +1,9 @@
-streamlit
-scikit-learn
-joblib
-xgboost
-pandas
-numpy
-shap
-matplotlib
-ed my ability to work effectively in a fast-paced, collaborative environment.”
+streamlit==1.31.0
+pandas==2.2.2
+numpy==1.26.4
+joblib==1.3.2
+scikit-learn==1.3.2
+xgboost==2.0.3
+shap==0.44.1
+matplotlib==3.8.2
+altair==5.2.0
